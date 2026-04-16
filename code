@@ -1,0 +1,129 @@
+import kagglehub
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.callbacks import ReduceLROnPlateau
+import os
+
+# =====================================
+# 1. DOWNLOAD DATA
+# =====================================
+dataset_path = kagglehub.dataset_download("karagwaanntreasure/plant-disease-detection")
+base_data_path = os.path.join(dataset_path, 'Dataset')
+
+# =====================================
+# 2. PARAMETERS
+# =====================================
+img_size = 160
+batch_size = 32
+
+# =====================================
+# 3. LOAD DATA
+# =====================================
+train_ds = tf.keras.utils.image_dataset_from_directory(
+    base_data_path,
+    validation_split=0.3,
+    subset="training",
+    seed=123,
+    image_size=(img_size, img_size),
+    batch_size=batch_size
+)
+
+val_ds = tf.keras.utils.image_dataset_from_directory(
+    base_data_path,
+    validation_split=0.3,
+    subset="validation",
+    seed=123,
+    image_size=(img_size, img_size),
+    batch_size=batch_size
+)
+
+class_names = train_ds.class_names
+
+# =====================================
+# 4. DATA AUGMENTATION
+# =====================================
+data_augmentation = tf.keras.Sequential([
+    layers.RandomFlip("horizontal"),
+    layers.RandomRotation(0.2),
+    layers.RandomZoom(0.2),
+])
+
+# =====================================
+# 5. MODEL (TRANSFER LEARNING)
+# =====================================
+base_model = MobileNetV2(
+    input_shape=(img_size, img_size, 3),
+    include_top=False,
+    weights='imagenet'
+)
+
+base_model.trainable = False
+
+model = models.Sequential([
+    data_augmentation,
+    layers.Rescaling(1./255),
+
+    base_model,
+    layers.GlobalAveragePooling2D(),
+
+    layers.BatchNormalization(),
+    layers.Dense(128, activation='relu'),
+    layers.Dropout(0.5),
+
+    layers.Dense(len(class_names), activation='softmax')
+])
+
+# =====================================
+# 6. COMPILE
+# =====================================
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+# =====================================
+# 7. CALLBACK (optional but useful)
+# =====================================
+reduce_lr = ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.3,
+    patience=2
+)
+
+# =====================================
+# 8. TRAIN (ONLY 5 EPOCHS)
+# =====================================
+history = model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=5,
+    callbacks=[reduce_lr]
+)
+
+# =====================================
+# 9. EVALUATE
+# =====================================
+_, accuracy = model.evaluate(val_ds)
+print(f"✅ Accuracy with 5 epochs: {accuracy * 100:.2f}%")import matplotlib.pyplot as plt
+
+# Plot training & validation accuracy values
+plt.figure(figsize=(12, 4))
+plt.subplot(1, 2, 1)
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+plt.title('Model accuracy')
+plt.ylabel('Accuracy')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
+
+# Plot training & validation loss values
+plt.subplot(1, 2, 2)
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
+plt.show()
